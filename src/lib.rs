@@ -52,7 +52,10 @@ impl<R: CommandRunner> SmokeService<R> {
             Ok(SmokeReport {
                 name: "smoke".to_string(),
                 passed: false,
-                reason: Some("not implemented".to_string()),
+                reason: Some(format!(
+                    "ctr version failed: exit_code={:?}, stderr={}",
+                    result.exit_code, result.stderr
+                )),
             })
         }
     }
