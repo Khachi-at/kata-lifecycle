@@ -70,3 +70,32 @@ async fn smoke_fails_when_ctr_version_returns_non_zero() {
     assert!(!report.passed);
     assert!(report.reason.as_deref().unwrap().contains("ctr failed"));
 }
+
+struct ErrorRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for ErrorRunner {
+    async fn run(
+        &self,
+        _program: &str,
+        _args: &[&str],
+        _timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        Err(anyhow::anyhow!("runner unavailable"))
+    }
+}
+
+#[tokio::test]
+async fn smoke_returns_error_when_runner_fails() {
+    let service = SmokeService::new(ErrorRunner, Duration::from_secs(3));
+
+    let result = service.run().await;
+
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("runner unavailable")
+    );
+}
