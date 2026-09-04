@@ -50,6 +50,25 @@ impl<R: CommandRunner> CtrClient<R> {
             .run("ctr", &["images", "pull", image], self.timeout)
             .await
     }
+
+    pub async fn run_container(
+        &self,
+        image: &str,
+        container_id: &str,
+        command: &[&str],
+    ) -> anyhow::Result<CommandResult> {
+        let mut args = vec![
+            "run",
+            "--runtime",
+            "io.containerd.kata.v2",
+            image,
+            container_id,
+        ];
+
+        args.extend_from_slice(command);
+
+        self.runner.run("ctr", &args, self.timeout).await
+    }
 }
 
 pub struct SmokeService<R> {

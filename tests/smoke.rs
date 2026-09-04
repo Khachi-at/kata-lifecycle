@@ -188,3 +188,53 @@ async fn ctr_client_pulls_image() {
     assert!(result.stdout.contains("unpacking"));
     assert_eq!(result.stderr, "");
 }
+
+struct RunContainerFakeRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for RunContainerFakeRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(
+            args,
+            &[
+                "run",
+                "--runtime",
+                "io.containerd.kata.v2",
+                "docker.io/library/busybox:latest",
+                "kata-lifecycle-test",
+                "sleep",
+                "300",
+            ]
+        );
+        assert_eq!(timeout, Duration::from_secs(30));
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 500,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_runs_container_with_kata_runtime() {
+    let client = CtrClient::new(RunContainerFakeRunner, Duration::from_secs(30));
+
+    let result = client
+        .run_container(
+            "docker.io/library/busybox:latest",
+            "kata-lifecycle-test",
+            &["sleep", "300"],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.exit_code, Some(0));
+}
