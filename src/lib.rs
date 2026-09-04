@@ -1,4 +1,6 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use tokio::process::Command;
 
 use anyhow::Ok;
 
@@ -58,5 +60,32 @@ impl<R: CommandRunner> SmokeService<R> {
                 )),
             })
         }
+    }
+}
+
+pub struct ProcessCommandRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for ProcessCommandRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        let started_at = Instant::now();
+
+        let output = tokio::time::timeout(timeout, Command::new(program).args(args).output())
+            .await
+            .map_err(|_| anyhow::anyhow!("command timed out: {program}"))??;
+
+        let duration_ms = started_at.elapsed().as_millis() as u64;
+
+        Ok(CommandResult {
+            exit_code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            duration_ms,
+        })
     }
 }

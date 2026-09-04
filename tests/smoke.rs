@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Ok;
-use kata_lifecycle::{CommandResult, CommandRunner, SmokeService};
+use kata_lifecycle::{CommandResult, CommandRunner, ProcessCommandRunner, SmokeService};
 
 struct FakeRunner;
 
@@ -98,4 +98,19 @@ async fn smoke_returns_error_when_runner_fails() {
             .to_string()
             .contains("runner unavailable")
     );
+}
+
+#[tokio::test]
+async fn process_runner_captures_command_output() {
+    let runner = ProcessCommandRunner;
+
+    let result = runner
+        .run("printf", &["hello"], Duration::from_secs(3))
+        .await
+        .unwrap();
+
+    assert_eq!(result.exit_code, Some(0));
+    assert_eq!(result.stdout, "hello");
+    assert_eq!(result.stderr, "");
+    assert!(result.duration_ms < 3_000);
 }
