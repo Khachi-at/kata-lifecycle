@@ -148,3 +148,43 @@ async fn ctr_client_returns_version_command_result() {
     assert!(result.stdout.contains("Version: 1.0.0"));
     assert_eq!(result.stderr, "");
 }
+
+struct PullImageFakeRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for PullImageFakeRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(
+            args,
+            &["images", "pull", "docker.io/library/busybox:latest"]
+        );
+        assert_eq!(timeout, Duration::from_secs(10));
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: "unpacking docker.io/library/busybox:latest".to_string(),
+            stderr: String::new(),
+            duration_ms: 120,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_pulls_image() {
+    let client = CtrClient::new(PullImageFakeRunner, Duration::from_secs(10));
+
+    let result = client
+        .pull_image("docker.io/library/busybox:latest")
+        .await
+        .unwrap();
+
+    assert_eq!(result.exit_code, Some(0));
+    assert!(result.stdout.contains("unpacking"));
+    assert_eq!(result.stderr, "");
+}

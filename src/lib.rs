@@ -44,6 +44,12 @@ impl<R: CommandRunner> CtrClient<R> {
     pub async fn version(&self) -> anyhow::Result<CommandResult> {
         self.runner.run("ctr", &["version"], self.timeout).await
     }
+
+    pub async fn pull_image(&self, image: &str) -> anyhow::Result<CommandResult> {
+        self.runner
+            .run("ctr", &["images", "pull", image], self.timeout)
+            .await
+    }
 }
 
 pub struct SmokeService<R> {
