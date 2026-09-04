@@ -29,6 +29,23 @@ pub trait CommandRunner {
     ) -> anyhow::Result<CommandResult>;
 }
 
+pub struct CtrClient<R> {
+    runner: R,
+    timeout: Duration,
+}
+
+impl<R> CtrClient<R> {
+    pub fn new(runner: R, timeout: Duration) -> Self {
+        Self { runner, timeout }
+    }
+}
+
+impl<R: CommandRunner> CtrClient<R> {
+    pub async fn version(&self) -> anyhow::Result<CommandResult> {
+        self.runner.run("ctr", &["version"], self.timeout).await
+    }
+}
+
 pub struct SmokeService<R> {
     runner: R,
     timeout: Duration,

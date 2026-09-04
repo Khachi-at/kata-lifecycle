@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Ok;
-use kata_lifecycle::{CommandResult, CommandRunner, ProcessCommandRunner, SmokeService};
+use kata_lifecycle::{CommandResult, CommandRunner, CtrClient, ProcessCommandRunner, SmokeService};
 
 struct FakeRunner;
 
@@ -113,4 +113,38 @@ async fn process_runner_captures_command_output() {
     assert_eq!(result.stdout, "hello");
     assert_eq!(result.stderr, "");
     assert!(result.duration_ms < 3_000);
+}
+
+struct CtrFakeRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for CtrFakeRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(args, &["version"]);
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: "Client: \n  Version: 1.0.0".to_string(),
+            stderr: String::new(),
+            duration_ms: 20,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_returns_version_command_result() {
+    let client = CtrClient::new(CtrFakeRunner, Duration::from_secs(5));
+
+    let result = client.version().await.unwrap();
+
+    assert_eq!(result.exit_code, Some(0));
+    assert!(result.stdout.contains("Version: 1.0.0"));
+    assert_eq!(result.stderr, "");
 }
