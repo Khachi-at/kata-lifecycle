@@ -187,25 +187,27 @@ impl<R: CommandRunner> SigkillScenario<R> {
         let remove_task_result = remove_task?;
         let remove_container_result = remove_container?;
 
+        let mut cleanup_failures = Vec::new();
+
         if remove_task_result.exit_code != Some(0) {
-            return Ok(ScenarioReport {
-                name: "sigkill".to_string(),
-                passed: false,
-                reason: Some(format!(
-                    "failed to remove task: exit_code={:?}, stderr={}",
-                    remove_task_result.exit_code, remove_task_result.stderr
-                )),
-            });
+            cleanup_failures.push(format!(
+                "failed to remove task: exit_code={:?}, stderr={}",
+                remove_task_result.exit_code, remove_task_result.stderr
+            ));
         }
 
         if remove_container_result.exit_code != Some(0) {
+            cleanup_failures.push(format!(
+                "failed to remove container: exit_code={:?}, stderr={}",
+                remove_container_result.exit_code, remove_container_result.stderr
+            ));
+        }
+
+        if !cleanup_failures.is_empty() {
             return Ok(ScenarioReport {
                 name: "sigkill".to_string(),
                 passed: false,
-                reason: Some(format!(
-                    "failed to remove container: exit_code={:?}, stderr={}",
-                    remove_container_result.exit_code, remove_container_result.stderr
-                )),
+                reason: Some(cleanup_failures.join("; ")),
             });
         }
 

@@ -1092,3 +1092,56 @@ async fn sigkill_scenario_cleans_up_when_start_runner_returns_error() {
     assert_eq!(calls[1], vec!["tasks", "rm", "kata-lifecycle-test"]);
     assert_eq!(calls[2], vec!["containers", "rm", "kata-lifecycle-test"]);
 }
+
+struct CleanupFailuresRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for CleanupFailuresRunner {
+    async fn run(
+        &self,
+        _program: &str,
+        args: &[&str],
+        _timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        let failure = if args.starts_with(&["tasks", "rm"]) {
+            Some("task cleanup failed")
+        } else if args.starts_with(&["containers", "rm"]) {
+            Some("container cleanup failed")
+        } else {
+            None
+        };
+
+        match failure {
+            Some(stderr) => Ok(CommandResult {
+                exit_code: Some(1),
+                stdout: String::new(),
+                stderr: stderr.to_string(),
+                duration_ms: 10,
+            }),
+            None => Ok(CommandResult {
+                exit_code: Some(0),
+                stdout: String::new(),
+                stderr: String::new(),
+                duration_ms: 10,
+            }),
+        }
+    }
+}
+
+#[tokio::test]
+async fn sigkill_scenario_reports_all_cleanup_failures() {
+    let client = CtrClient::new(CleanupFailuresRunner, Duration::from_secs(5));
+
+    let scenario = SigkillScenario::new(
+        client,
+        "docker.io/library/busybox:latest",
+        "kata-lifecycle-test",
+    );
+
+    let report = scenario.run().await.unwrap();
+    let reason = report.reason.unwrap();
+
+    assert!(!report.passed);
+    assert!(reason.contains("task cleanup failed"));
+    assert!(reason.contains("container cleanup failed"));
+}
