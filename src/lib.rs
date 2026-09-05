@@ -132,10 +132,17 @@ impl<R> SigkillScenario<R> {
 
 impl<R: CommandRunner> SigkillScenario<R> {
     pub async fn run(&self) -> anyhow::Result<ScenarioReport> {
-        let start_result = self
+        let start_result = match self
             .client
             .run_container(&self.image, &self.container_id, &["sleep", "300"])
-            .await?;
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let _cleanup = self.cleanup().await;
+                return Err(error);
+            }
+        };
 
         if start_result.exit_code != Some(0) {
             let _cleanup = self.cleanup().await;

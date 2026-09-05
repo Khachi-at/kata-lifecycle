@@ -1030,3 +1030,65 @@ async fn sigkill_scenario_continues_cleanup_after_task_runner_error() {
     assert_eq!(calls[2], vec!["tasks", "rm", "kata-lifecycle-test"]);
     assert_eq!(calls[3], vec!["containers", "rm", "kata-lifecycle-test"]);
 }
+
+struct StartRunnerError {
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait::async_trait]
+impl CommandRunner for StartRunnerError {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        self.calls
+            .lock()
+            .unwrap()
+            .push(args.iter().map(|arg| arg.to_string()).collect());
+
+        if args.first() == Some(&"run") {
+            return Err(anyhow::anyhow!("container start timed out"));
+        }
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 10,
+        })
+    }
+}
+
+#[tokio::test]
+async fn sigkill_scenario_cleans_up_when_start_runner_returns_error() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+
+    let client = CtrClient::new(
+        StartRunnerError {
+            calls: Arc::clone(&calls),
+        },
+        Duration::from_secs(5),
+    );
+
+    let scenario = SigkillScenario::new(
+        client,
+        "docker.io/library/busybox:latest",
+        "kata-lifecycle-test",
+    );
+
+    let error = scenario.run().await.unwrap_err();
+
+    assert!(error.to_string().contains("container start timed out"));
+
+    let calls = calls.lock().unwrap();
+
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[0][0], "run");
+    assert_eq!(calls[1], vec!["tasks", "rm", "kata-lifecycle-test"]);
+    assert_eq!(calls[2], vec!["containers", "rm", "kata-lifecycle-test"]);
+}
