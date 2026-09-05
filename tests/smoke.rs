@@ -1278,3 +1278,51 @@ async fn ctr_client_waits_until_task_is_absent() {
 
     assert_eq!(queries.load(Ordering::SeqCst), 3);
 }
+
+struct TaskNeverDisappearsRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for TaskNeverDisappearsRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        _timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(args, &["tasks", "list"]);
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: concat!(
+                "TASK                 PID     STATUS\n",
+                "kata-lifecycle-test  1234    STOPPED\n",
+            )
+            .to_string(),
+            stderr: String::new(),
+            duration_ms: 2,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_times_out_when_task_never_disappears() {
+    let client = CtrClient::new(TaskNeverDisappearsRunner, Duration::from_secs(5));
+
+    let started_at = Instant::now();
+
+    let error = client
+        .wait_until_task_absent(
+            "kata-lifecycle-test",
+            Duration::from_millis(30),
+            Duration::from_millis(5),
+        )
+        .await
+        .unwrap_err();
+
+    let message = error.to_string();
+
+    assert!(started_at.elapsed() < Duration::from_secs(1));
+    assert!(message.contains("kata-lifecycle-test"));
+    assert!(message.contains("30ms"));
+}

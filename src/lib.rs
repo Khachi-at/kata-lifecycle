@@ -116,7 +116,12 @@ impl<R: CommandRunner> CtrClient<R> {
             }
         })
         .await
-        .map_err(|_| anyhow::anyhow!("timed out waiting for task {container_id} to disappear"))?
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "timed out after {wait_timeout:?} waiting for task \
+            {container_id} to disappear"
+            )
+        })?
     }
 
     pub async fn kill_task(
