@@ -2,8 +2,6 @@ use std::time::{Duration, Instant};
 
 use tokio::process::Command;
 
-use anyhow::Ok;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmokeReport {
     pub name: String,
@@ -148,7 +146,15 @@ impl<R: CommandRunner> SigkillScenario<R> {
             });
         }
 
-        let kill_result = self.client.kill_task(&self.container_id, "SIGKILL").await?;
+        let kill_result = match self.client.kill_task(&self.container_id, "SIGKILL").await {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = self.client.remove_task(&self.container_id).await;
+                let _ = self.client.remove_container(&self.container_id).await;
+
+                return Err(error);
+            }
+        };
 
         if kill_result.exit_code != Some(0) {
             let _ = self.client.remove_task(&self.container_id).await;

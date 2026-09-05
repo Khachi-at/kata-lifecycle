@@ -890,3 +890,82 @@ async fn process_runner_kills_command_when_timeout_expires() {
     assert!(elapsed < Duration::from_secs(2));
     assert!(!process_is_alive, "timed-out command was left running");
 }
+
+struct KillRunnerError {
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait::async_trait]
+impl CommandRunner for KillRunnerError {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        self.calls
+            .lock()
+            .unwrap()
+            .push(args.iter().map(|arg| arg.to_string()).collect());
+
+        if args.starts_with(&["tasks", "kill"]) {
+            return Err(anyhow::anyhow!("kill command timed out"));
+        }
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 10,
+        })
+    }
+}
+
+#[tokio::test]
+async fn sigkill_scenario_cleans_up_when_kill_runner_returns_error() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+
+    let runner = KillRunnerError {
+        calls: Arc::clone(&calls),
+    };
+
+    let client = CtrClient::new(runner, Duration::from_secs(5));
+
+    let scenario = SigkillScenario::new(
+        client,
+        "docker.io/library/busybox:latest",
+        "kata-lifecycle-test",
+    );
+
+    let error = scenario.run().await.unwrap_err();
+
+    assert!(error.to_string().contains("kill command timed out"));
+
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![
+            vec![
+                "run",
+                "--runtime",
+                "io.containerd.kata.v2",
+                "--detach",
+                "docker.io/library/busybox:latest",
+                "kata-lifecycle-test",
+                "sleep",
+                "300",
+            ],
+            vec![
+                "tasks",
+                "kill",
+                "--signal",
+                "SIGKILL",
+                "kata-lifecycle-test",
+            ],
+            vec!["tasks", "rm", "kata-lifecycle-test"],
+            vec!["containers", "rm", "kata-lifecycle-test"],
+        ]
+    );
+}
