@@ -69,6 +69,12 @@ impl<R: CommandRunner> CtrClient<R> {
 
         self.runner.run("ctr", &args, self.timeout).await
     }
+
+    pub async fn list_tasks(&self) -> anyhow::Result<CommandResult> {
+        self.runner
+            .run("ctr", &["tasks", "list"], self.timeout)
+            .await
+    }
 }
 
 pub struct SmokeService<R> {

@@ -238,3 +238,42 @@ async fn ctr_client_runs_container_with_kata_runtime() {
 
     assert_eq!(result.exit_code, Some(0));
 }
+
+struct ListTasksFakeRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for ListTasksFakeRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(args, &["tasks", "list"]);
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: concat!(
+                "TASK                 PID     STATUS\n",
+                "kata-lifecycle-test  1234    RUNNING\n",
+            )
+            .to_string(),
+            stderr: String::new(),
+            duration_ms: 15,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_lists_tasks() {
+    let client = CtrClient::new(ListTasksFakeRunner, Duration::from_secs(5));
+
+    let result = client.list_tasks().await.unwrap();
+
+    assert_eq!(result.exit_code, Some(0));
+    assert!(result.stdout.contains("kata-lifecycle-test"));
+    assert!(result.stdout.contains("RUNNING"));
+    assert_eq!(result.stderr, "");
+}
