@@ -85,6 +85,14 @@ impl<R: CommandRunner> CtrClient<R> {
     pub async fn task_exists(&self, container_id: &str) -> anyhow::Result<bool> {
         let result = self.list_tasks().await?;
 
+        if result.exit_code != Some(0) {
+            return Err(anyhow::anyhow!(
+                "failed to list tasks: exit_code={:?}, stderr={}",
+                result.exit_code,
+                result.stderr,
+            ));
+        }
+
         Ok(result
             .stdout
             .lines()

@@ -1181,3 +1181,38 @@ async fn ctr_client_checks_task_using_exact_container_id() {
 
     assert!(!client.task_exists("kata-lifecycle-test-1").await.unwrap());
 }
+
+struct ListTasksFailureRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for ListTasksFailureRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(args, &["tasks", "list"]);
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        Ok(CommandResult {
+            exit_code: Some(1),
+            stdout: String::new(),
+            stderr: "containerd is unavailable".to_string(),
+            duration_ms: 15,
+        })
+    }
+}
+
+#[tokio::test]
+async fn task_exists_returns_error_when_task_listing_fails() {
+    let client = CtrClient::new(ListTasksFailureRunner, Duration::from_secs(5));
+
+    let error = client.task_exists("kata-lifecycle-test").await.unwrap_err();
+
+    let message = error.to_string();
+
+    assert!(message.contains("containerd is unavailable"));
+    assert!(message.contains("Some(1)"));
+}
