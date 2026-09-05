@@ -96,6 +96,12 @@ impl<R: CommandRunner> CtrClient<R> {
             .run("ctr", &["tasks", "rm", container_id], self.timeout)
             .await
     }
+
+    pub async fn remove_container(&self, container_id: &str) -> anyhow::Result<CommandResult> {
+        self.runner
+            .run("ctr", &["containers", "rm", container_id], self.timeout)
+            .await
+    }
 }
 
 pub struct SmokeService<R> {
