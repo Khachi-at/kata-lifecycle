@@ -278,3 +278,48 @@ async fn ctr_client_lists_tasks() {
     assert!(result.stdout.contains("RUNNING"));
     assert_eq!(result.stderr, "");
 }
+
+struct KillTaskFakeRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for KillTaskFakeRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(
+            args,
+            &[
+                "tasks",
+                "kill",
+                "--signal",
+                "SIGKILL",
+                "kata-lifecycle-test",
+            ]
+        );
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 18,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_sends_signal_to_task() {
+    let client = CtrClient::new(KillTaskFakeRunner, Duration::from_secs(5));
+
+    let result = client
+        .kill_task("kata-lifecycle-test", "SIGKILL")
+        .await
+        .unwrap();
+
+    assert_eq!(result.exit_code, Some(0));
+    assert_eq!(result.stderr, "");
+}
