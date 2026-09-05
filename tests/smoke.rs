@@ -651,3 +651,95 @@ async fn sigkill_scenario_reports_kill_failure_and_attempts_cleanup() {
         ]
     );
 }
+
+struct RemoveTaskFailureRunner {
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait::async_trait]
+impl CommandRunner for RemoveTaskFailureRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        self.calls
+            .lock()
+            .unwrap()
+            .push(args.iter().map(|arg| arg.to_string()).collect());
+
+        if args.starts_with(&["tasks", "rm"]) {
+            return Ok(CommandResult {
+                exit_code: Some(1),
+                stdout: String::new(),
+                stderr: "failed to remove task".to_string(),
+                duration_ms: 14,
+            });
+        }
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 10,
+        })
+    }
+}
+
+#[tokio::test]
+async fn sigkill_scenario_reports_task_removal_failure_and_removes_container() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+
+    let runner = RemoveTaskFailureRunner {
+        calls: Arc::clone(&calls),
+    };
+
+    let client = CtrClient::new(runner, Duration::from_secs(5));
+
+    let scenario = SigkillScenario::new(
+        client,
+        "docker.io/library/busybox:latest",
+        "kata-lifecycle-test",
+    );
+
+    let report = scenario.run().await.unwrap();
+
+    assert_eq!(report.name, "sigkill");
+    assert!(!report.passed);
+    assert!(
+        report
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("failed to remove task")
+    );
+
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![
+            vec![
+                "run",
+                "--runtime",
+                "io.containerd.kata.v2",
+                "--detach",
+                "docker.io/library/busybox:latest",
+                "kata-lifecycle-test",
+                "sleep",
+                "300",
+            ],
+            vec![
+                "tasks",
+                "kill",
+                "--signal",
+                "SIGKILL",
+                "kata-lifecycle-test",
+            ],
+            vec!["tasks", "rm", "kata-lifecycle-test"],
+            vec!["containers", "rm", "kata-lifecycle-test"],
+        ]
+    );
+}

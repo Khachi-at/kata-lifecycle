@@ -164,9 +164,20 @@ impl<R: CommandRunner> SigkillScenario<R> {
             });
         }
 
-        self.client.remove_task(&self.container_id).await?;
+        let remove_task_result = self.client.remove_task(&self.container_id).await?;
 
-        self.client.remove_container(&self.container_id).await?;
+        let _remove_container_result = self.client.remove_container(&self.container_id).await?;
+
+        if remove_task_result.exit_code != Some(0) {
+            return Ok(ScenarioReport {
+                name: "sigkill".to_string(),
+                passed: false,
+                reason: Some(format!(
+                    "failed to remove task: exit_code={:?}, stderr={}",
+                    remove_task_result.exit_code, remove_task_result.stderr
+                )),
+            });
+        }
 
         Ok(ScenarioReport {
             name: "sigkill".to_string(),
