@@ -129,9 +129,24 @@ impl<R> SigkillScenario<R> {
 
 impl<R: CommandRunner> SigkillScenario<R> {
     pub async fn run(&self) -> anyhow::Result<ScenarioReport> {
-        self.client
+        let start_result = self
+            .client
             .run_container(&self.image, &self.container_id, &["sleep", "300"])
             .await?;
+
+        if start_result.exit_code != Some(0) {
+            let _ = self.client.remove_task(&self.container_id).await;
+            let _ = self.client.remove_container(&self.container_id).await;
+
+            return Ok(ScenarioReport {
+                name: "sigkill".to_string(),
+                passed: false,
+                reason: Some(format!(
+                    "failed to start container: exit_code={:?}, stderr={}",
+                    start_result.exit_code, start_result.stderr,
+                )),
+            });
+        }
 
         self.client.kill_task(&self.container_id, "SIGKILL").await?;
 
