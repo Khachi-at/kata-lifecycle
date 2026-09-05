@@ -148,7 +148,21 @@ impl<R: CommandRunner> SigkillScenario<R> {
             });
         }
 
-        self.client.kill_task(&self.container_id, "SIGKILL").await?;
+        let kill_result = self.client.kill_task(&self.container_id, "SIGKILL").await?;
+
+        if kill_result.exit_code != Some(0) {
+            let _ = self.client.remove_task(&self.container_id).await;
+            let _ = self.client.remove_container(&self.container_id).await;
+
+            return Ok(ScenarioReport {
+                name: "sigkill".to_string(),
+                passed: false,
+                reason: Some(format!(
+                    "failed to kill task: exit_code={:?}, stderr={}",
+                    kill_result.exit_code, kill_result.stderr,
+                )),
+            });
+        }
 
         self.client.remove_task(&self.container_id).await?;
 
