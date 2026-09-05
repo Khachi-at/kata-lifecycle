@@ -82,6 +82,16 @@ impl<R: CommandRunner> CtrClient<R> {
             .await
     }
 
+    pub async fn task_exists(&self, container_id: &str) -> anyhow::Result<bool> {
+        let result = self.list_tasks().await?;
+
+        Ok(result
+            .stdout
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .any(|task_id| task_id == container_id))
+    }
+
     pub async fn kill_task(
         &self,
         container_id: &str,

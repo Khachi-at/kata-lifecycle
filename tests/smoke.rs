@@ -1145,3 +1145,39 @@ async fn sigkill_scenario_reports_all_cleanup_failures() {
     assert!(reason.contains("task cleanup failed"));
     assert!(reason.contains("container cleanup failed"));
 }
+
+struct TaskExistsFakeRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for TaskExistsFakeRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(args, &["tasks", "list"]);
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: concat!(
+                "TASK                    PID     STATUS\n",
+                "kata-lifecycle-test-10   1234    RUNNING\n",
+            )
+            .to_string(),
+            stderr: String::new(),
+            duration_ms: 12,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_checks_task_using_exact_container_id() {
+    let client = CtrClient::new(TaskExistsFakeRunner, Duration::from_secs(5));
+
+    assert!(client.task_exists("kata-lifecycle-test-10").await.unwrap());
+
+    assert!(!client.task_exists("kata-lifecycle-test-1").await.unwrap());
+}
