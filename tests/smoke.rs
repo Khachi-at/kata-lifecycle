@@ -969,3 +969,64 @@ async fn sigkill_scenario_cleans_up_when_kill_runner_returns_error() {
         ]
     );
 }
+
+struct RemoveTaskRunnerError {
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+#[async_trait::async_trait]
+impl CommandRunner for RemoveTaskRunnerError {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        self.calls
+            .lock()
+            .unwrap()
+            .push(args.iter().map(|arg| arg.to_string()).collect());
+
+        if args.starts_with(&["tasks", "rm"]) {
+            return Err(anyhow::anyhow!("task removal timed out"));
+        }
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 10,
+        })
+    }
+}
+
+#[tokio::test]
+async fn sigkill_scenario_continues_cleanup_after_task_runner_error() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+
+    let client = CtrClient::new(
+        RemoveTaskRunnerError {
+            calls: Arc::clone(&calls),
+        },
+        Duration::from_secs(5),
+    );
+
+    let scenario = SigkillScenario::new(
+        client,
+        "docker.io/library/busybox:latest",
+        "kata-lifecycle-test",
+    );
+
+    let error = scenario.run().await.unwrap_err();
+
+    assert!(error.to_string().contains("task removal timed out"));
+
+    let calls = calls.lock().unwrap();
+
+    assert_eq!(calls.len(), 4);
+    assert_eq!(calls[2], vec!["tasks", "rm", "kata-lifecycle-test"]);
+    assert_eq!(calls[3], vec!["containers", "rm", "kata-lifecycle-test"]);
+}

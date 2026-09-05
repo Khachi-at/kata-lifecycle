@@ -109,6 +109,11 @@ impl<R: CommandRunner> CtrClient<R> {
     }
 }
 
+struct CleanupResults {
+    remove_task: anyhow::Result<CommandResult>,
+    remove_container: anyhow::Result<CommandResult>,
+}
+
 pub struct SigkillScenario<R> {
     client: CtrClient<R>,
     image: String,
@@ -133,8 +138,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
             .await?;
 
         if start_result.exit_code != Some(0) {
-            let _ = self.client.remove_task(&self.container_id).await;
-            let _ = self.client.remove_container(&self.container_id).await;
+            let _cleanup = self.cleanup().await;
 
             return Ok(ScenarioReport {
                 name: "sigkill".to_string(),
@@ -149,16 +153,14 @@ impl<R: CommandRunner> SigkillScenario<R> {
         let kill_result = match self.client.kill_task(&self.container_id, "SIGKILL").await {
             Ok(result) => result,
             Err(error) => {
-                let _ = self.client.remove_task(&self.container_id).await;
-                let _ = self.client.remove_container(&self.container_id).await;
+                let _cleanup = self.cleanup().await;
 
                 return Err(error);
             }
         };
 
         if kill_result.exit_code != Some(0) {
-            let _ = self.client.remove_task(&self.container_id).await;
-            let _ = self.client.remove_container(&self.container_id).await;
+            let _cleanup = self.cleanup().await;
 
             return Ok(ScenarioReport {
                 name: "sigkill".to_string(),
@@ -170,9 +172,13 @@ impl<R: CommandRunner> SigkillScenario<R> {
             });
         }
 
-        let remove_task_result = self.client.remove_task(&self.container_id).await?;
+        let CleanupResults {
+            remove_task,
+            remove_container,
+        } = self.cleanup().await;
 
-        let remove_container_result = self.client.remove_container(&self.container_id).await?;
+        let remove_task_result = remove_task?;
+        let remove_container_result = remove_container?;
 
         if remove_task_result.exit_code != Some(0) {
             return Ok(ScenarioReport {
@@ -201,6 +207,17 @@ impl<R: CommandRunner> SigkillScenario<R> {
             passed: true,
             reason: None,
         })
+    }
+
+    async fn cleanup(&self) -> CleanupResults {
+        let remove_task = self.client.remove_task(&self.container_id).await;
+
+        let remove_container = self.client.remove_container(&self.container_id).await;
+
+        CleanupResults {
+            remove_task,
+            remove_container,
+        }
     }
 }
 
