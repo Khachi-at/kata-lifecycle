@@ -19,6 +19,13 @@ pub struct CommandResult {
     pub duration_ms: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScenarioReport {
+    pub name: String,
+    pub passed: bool,
+    pub reason: Option<String>,
+}
+
 #[async_trait::async_trait]
 pub trait CommandRunner {
     async fn run(
@@ -101,6 +108,42 @@ impl<R: CommandRunner> CtrClient<R> {
         self.runner
             .run("ctr", &["containers", "rm", container_id], self.timeout)
             .await
+    }
+}
+
+pub struct SigkillScenario<R> {
+    client: CtrClient<R>,
+    image: String,
+    container_id: String,
+}
+
+impl<R> SigkillScenario<R> {
+    pub fn new(client: CtrClient<R>, image: &str, container_id: &str) -> Self {
+        Self {
+            client,
+            image: image.to_string(),
+            container_id: container_id.to_string(),
+        }
+    }
+}
+
+impl<R: CommandRunner> SigkillScenario<R> {
+    pub async fn run(&self) -> anyhow::Result<ScenarioReport> {
+        self.client
+            .run_container(&self.image, &self.container_id, &["sleep", "300"])
+            .await?;
+
+        self.client.kill_task(&self.container_id, "SIGKILL").await?;
+
+        self.client.remove_task(&self.container_id).await?;
+
+        self.client.remove_container(&self.container_id).await?;
+
+        Ok(ScenarioReport {
+            name: "sigkill".to_string(),
+            passed: true,
+            reason: None,
+        })
     }
 }
 
