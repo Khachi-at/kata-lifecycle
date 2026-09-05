@@ -1,6 +1,6 @@
 use std::{
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::Ok;
@@ -834,4 +834,59 @@ async fn sigkill_scenario_reports_container_removal_failure() {
             vec!["containers", "rm", "kata-lifecycle-test"],
         ]
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn process_runner_kills_command_when_timeout_expires() {
+    let runner = ProcessCommandRunner;
+
+    let pid_file =
+        std::env::temp_dir().join(format!("kata-lifecycle-timeout-{}.pid", std::process::id()));
+
+    let _ = std::fs::remove_file(&pid_file);
+
+    let script = format!("echo $$ > \"{}\"; exec sleep 30", pid_file.display());
+
+    let started_at = Instant::now();
+
+    let error = runner
+        .run("sh", &["-c", script.as_str()], Duration::from_millis(200))
+        .await
+        .unwrap_err();
+
+    let elapsed = started_at.elapsed();
+
+    let pid = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .to_string();
+
+    let mut process_is_alive = true;
+
+    for _ in 0..50 {
+        process_is_alive = std::process::Command::new("kill")
+            .args(["-0", pid.as_str()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+
+        if !process_is_alive {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    if process_is_alive {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", pid.as_str()])
+            .status();
+    }
+
+    let _ = std::fs::remove_file(&pid_file);
+
+    assert!(error.to_string().contains("command timed out"));
+    assert!(elapsed < Duration::from_secs(2));
+    assert!(!process_is_alive, "timed-out command was left running");
 }

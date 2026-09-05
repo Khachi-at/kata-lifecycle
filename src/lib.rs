@@ -244,7 +244,11 @@ impl CommandRunner for ProcessCommandRunner {
     ) -> anyhow::Result<CommandResult> {
         let started_at = Instant::now();
 
-        let output = tokio::time::timeout(timeout, Command::new(program).args(args).output())
+        let mut command = Command::new(program);
+
+        command.args(args).kill_on_drop(true);
+
+        let output = tokio::time::timeout(timeout, command.output())
             .await
             .map_err(|_| anyhow::anyhow!("command timed out: {program}"))??;
 
