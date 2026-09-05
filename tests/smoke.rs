@@ -206,6 +206,7 @@ impl CommandRunner for RunContainerFakeRunner {
                 "run",
                 "--runtime",
                 "io.containerd.kata.v2",
+                "--detach",
                 "docker.io/library/busybox:latest",
                 "kata-lifecycle-test",
                 "sleep",

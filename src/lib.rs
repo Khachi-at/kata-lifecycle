@@ -61,6 +61,7 @@ impl<R: CommandRunner> CtrClient<R> {
             "run",
             "--runtime",
             "io.containerd.kata.v2",
+            "--detach",
             image,
             container_id,
         ];
