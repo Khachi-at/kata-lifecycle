@@ -323,3 +323,36 @@ async fn ctr_client_sends_signal_to_task() {
     assert_eq!(result.exit_code, Some(0));
     assert_eq!(result.stderr, "");
 }
+
+struct RemoveTaskFakeRunner;
+
+#[async_trait::async_trait]
+impl CommandRunner for RemoveTaskFakeRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(args, &["tasks", "rm", "kata-lifecycle-test"]);
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 25,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_removes_stopped_task() {
+    let client = CtrClient::new(RemoveTaskFakeRunner, Duration::from_secs(5));
+
+    let result = client.remove_task("kata-lifecycle-test").await.unwrap();
+
+    assert_eq!(result.exit_code, Some(0));
+    assert_eq!(result.stderr, "");
+}
