@@ -100,6 +100,25 @@ impl<R: CommandRunner> CtrClient<R> {
             .any(|task_id| task_id == container_id))
     }
 
+    pub async fn wait_until_task_absent(
+        &self,
+        container_id: &str,
+        wait_timeout: Duration,
+        poll_interval: Duration,
+    ) -> anyhow::Result<()> {
+        tokio::time::timeout(wait_timeout, async {
+            loop {
+                if !self.task_exists(container_id).await? {
+                    return Ok(());
+                }
+
+                tokio::time::sleep(poll_interval).await;
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for task {container_id} to disappear"))?
+    }
+
     pub async fn kill_task(
         &self,
         container_id: &str,

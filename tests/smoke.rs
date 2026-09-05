@@ -1,5 +1,8 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -1215,4 +1218,63 @@ async fn task_exists_returns_error_when_task_listing_fails() {
 
     assert!(message.contains("containerd is unavailable"));
     assert!(message.contains("Some(1)"));
+}
+
+struct TaskDisappearsRunner {
+    queries: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl CommandRunner for TaskDisappearsRunner {
+    async fn run(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<CommandResult> {
+        assert_eq!(program, "ctr");
+        assert_eq!(args, &["tasks", "list"]);
+        assert_eq!(timeout, Duration::from_secs(5));
+
+        let query = self.queries.fetch_add(1, Ordering::SeqCst);
+
+        let stdout = if query < 2 {
+            concat!(
+                "TASK                 PID     STATUS\n",
+                "kata-lifecycle-test  1234    STOPPED\n",
+            )
+        } else {
+            "TASK    PID    STATUS\n"
+        };
+
+        Ok(CommandResult {
+            exit_code: Some(0),
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+            duration_ms: 5,
+        })
+    }
+}
+
+#[tokio::test]
+async fn ctr_client_waits_until_task_is_absent() {
+    let queries = Arc::new(AtomicUsize::new(0));
+
+    let client = CtrClient::new(
+        TaskDisappearsRunner {
+            queries: Arc::clone(&queries),
+        },
+        Duration::from_secs(5),
+    );
+
+    client
+        .wait_until_task_absent(
+            "kata-lifecycle-test",
+            Duration::from_secs(1),
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(queries.load(Ordering::SeqCst), 3);
 }
