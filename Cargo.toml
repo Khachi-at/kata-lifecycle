@@ -7,3 +7,4 @@ edition = "2024"
 anyhow = "1"
 async-trait = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process"] }
+tempfile = "3"

@@ -8,7 +8,8 @@ use std::{
 
 use anyhow::Ok;
 use kata_lifecycle::{
-    CommandResult, CommandRunner, CtrClient, ProcessCommandRunner, SigkillScenario, SmokeService,
+    CommandResult, CommandRunner, CtrClient, ProcessCollector, ProcessCommandRunner,
+    SigkillScenario, SmokeService,
 };
 
 struct FakeRunner;
@@ -1325,4 +1326,47 @@ async fn ctr_client_times_out_when_task_never_disappears() {
     assert!(started_at.elapsed() < Duration::from_secs(1));
     assert!(message.contains("kata-lifecycle-test"));
     assert!(message.contains("30ms"));
+}
+
+#[cfg(unix)]
+#[test]
+fn process_collector_reads_process_from_procfs() {
+    use std::os::unix::fs::symlink;
+
+    let proc_root = tempfile::tempdir().unwrap();
+    let process_dir = proc_root.path().join("1234");
+
+    std::fs::create_dir(&process_dir).unwrap();
+
+    std::fs::write(
+        process_dir.join("status"),
+        concat!(
+            "Name:\tqemu-system-x86\n",
+            "State:\tS {sleeping}\n",
+            "PPid:\t42\n",
+            "VmRSS:\t400 kB\n",
+        ),
+    )
+    .unwrap();
+
+    std::fs::write(
+        process_dir.join("cmdline"),
+        b"qemu-system-x86_64\0-name\0kata-test\0",
+    )
+    .unwrap();
+
+    symlink("/usr/bin/qemu-system-x86_64", process_dir.join("exe")).unwrap();
+
+    let collector = ProcessCollector::new(proc_root.path());
+    let process = collector.read_process(1234).unwrap();
+
+    assert_eq!(process.pid, 1234);
+    assert_eq!(process.ppid, 42);
+    assert_eq!(process.state, "S");
+    assert_eq!(process.rss_bytes, 400 * 1024);
+    assert_eq!(
+        process.cmdline,
+        vec!["qemu-system-x86_64", "-name", "kata-test"]
+    );
+    assert_eq!(process.exe.to_string_lossy(), "/usr/bin/qemu-system-x86_64");
 }

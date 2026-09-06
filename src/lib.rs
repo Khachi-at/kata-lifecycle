@@ -1,3 +1,7 @@
+mod process;
+
+pub use process::{ProcessCollector, ProcessInfo};
+
 use std::time::{Duration, Instant};
 
 use tokio::process::Command;
