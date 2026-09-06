@@ -281,7 +281,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
         wait_timeout: Duration,
         poll_interval: Duration,
     ) -> anyhow::Result<ScenarioReport> {
-        let before = collector.snapshot_kind(ProcessKind::Qemu)?;
+        let before = collector.snapshot()?;
 
         let mut report = self.run().await?;
 
@@ -289,12 +289,17 @@ impl<R: CommandRunner> SigkillScenario<R> {
             return Ok(report);
         }
 
-        if let Err(error) = collector
-            .wait_until_clean(&before, ProcessKind::Qemu, wait_timeout, poll_interval)
-            .await
-        {
-            report.passed = false;
-            report.reason = Some(format!("resource cleanup failed: {error}"));
+        let resource_kinds = [ProcessKind::Qemu, ProcessKind::Shim, ProcessKind::Virtiofsd];
+
+        for kind in resource_kinds {
+            if let Err(error) = collector
+                .wait_until_clean(&before, kind, wait_timeout, poll_interval)
+                .await
+            {
+                report.passed = false;
+                report.reason = Some(format!("resource cleanup failed: {error}"));
+                break;
+            }
         }
 
         Ok(report)

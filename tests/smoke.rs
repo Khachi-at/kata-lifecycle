@@ -1708,3 +1708,87 @@ async fn sigkill_scenario_ignores_qemu_existing_before_test() {
     assert!(report.passed);
     assert_eq!(report.reason, None);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sigkill_scenario_reports_new_shim_process() {
+    use std::os::unix::fs::symlink;
+
+    struct LeakingShimRunner {
+        proc_root: std::path::PathBuf,
+    }
+
+    #[async_trait::async_trait]
+    impl CommandRunner for LeakingShimRunner {
+        async fn run(
+            &self,
+            program: &str,
+            args: &[&str],
+            timeout: Duration,
+        ) -> anyhow::Result<CommandResult> {
+            assert_eq!(program, "ctr");
+            assert_eq!(timeout, Duration::from_secs(5));
+
+            if args.first() == Some(&"run") {
+                let process_dir = self.proc_root.join("300");
+                std::fs::create_dir(&process_dir).unwrap();
+
+                std::fs::write(
+                    process_dir.join("status"),
+                    "Name:\tcontainerd-shim-kata-v2\n\
+                     State:\tS (sleeping)\n\
+                     PPid:\t1\n\
+                     VmRSS:\t32 kB\n",
+                )
+                .unwrap();
+
+                std::fs::write(
+                    process_dir.join("cmdline"),
+                    b"containerd-shim-kata-v2\0kata-test\0",
+                )
+                .unwrap();
+
+                symlink("/usr/bin/containerd-shim-kata-v2", process_dir.join("exe")).unwrap();
+            }
+
+            Ok(CommandResult {
+                exit_code: Some(0),
+                stdout: String::new(),
+                stderr: String::new(),
+                duration_ms: 10,
+            })
+        }
+    }
+
+    let proc_root = tempfile::tempdir().unwrap();
+    let collector = ProcessCollector::new(proc_root.path());
+
+    let client = CtrClient::new(
+        LeakingShimRunner {
+            proc_root: proc_root.path().to_path_buf(),
+        },
+        Duration::from_secs(5),
+    );
+
+    let scenario = SigkillScenario::new(
+        client,
+        "docker.io/library/busybox:latest",
+        "kata-lifecycle-test",
+    );
+
+    let report = scenario
+        .run_with_process_collector(
+            &collector,
+            Duration::from_millis(30),
+            Duration::from_millis(5),
+        )
+        .await
+        .unwrap();
+
+    assert!(!report.passed);
+
+    let reason = report.reason.unwrap();
+
+    assert!(reason.contains("Shim"));
+    assert!(reason.contains("300"));
+}
