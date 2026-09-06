@@ -8,8 +8,8 @@ use std::{
 
 use anyhow::Ok;
 use kata_lifecycle::{
-    CommandResult, CommandRunner, CtrClient, ProcessCollector, ProcessCommandRunner,
-    SigkillScenario, SmokeService,
+    CommandResult, CommandRunner, CtrClient, ProcessCollector, ProcessCommandRunner, ProcessInfo,
+    ProcessKind, SigkillScenario, SmokeService,
 };
 
 struct FakeRunner;
@@ -1426,4 +1426,27 @@ fn process_collector_snapshots_valid_processes() {
     );
 
     assert_eq!(processes[1].cmdline, vec!["qemu-system-x86_64", "--test"]);
+}
+
+#[test]
+fn process_info_classifies_kata_processes_by_executable() {
+    let cases = [
+        ("/usr/bin/containerd-shim-kata-v2", ProcessKind::Shim),
+        ("/usr/bin/qemu-system-x86_64", ProcessKind::Qemu),
+        ("/usr/bin/virtiofsd", ProcessKind::Virtiofsd),
+        ("/usr/bin/other-process", ProcessKind::Other),
+    ];
+
+    for (exe, expected_kind) in cases {
+        let process = ProcessInfo {
+            pid: 1234,
+            ppid: 1,
+            state: "S".to_string(),
+            rss_bytes: 1024,
+            cmdline: Vec::new(),
+            exe: exe.into(),
+        };
+
+        assert_eq!(process.kind(), expected_kind);
+    }
 }

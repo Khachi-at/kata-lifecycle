@@ -1,5 +1,13 @@
 use std::{fs, path::PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessKind {
+    Shim,
+    Qemu,
+    Virtiofsd,
+    Other,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessInfo {
     pub pid: u32,
@@ -8,6 +16,17 @@ pub struct ProcessInfo {
     pub rss_bytes: u64,
     pub cmdline: Vec<String>,
     pub exe: PathBuf,
+}
+
+impl ProcessInfo {
+    pub fn kind(&self) -> ProcessKind {
+        match self.exe.file_name().and_then(|name| name.to_str()) {
+            Some("containerd-shim-kata-v2") => ProcessKind::Shim,
+            Some("qemu-system-x86_64") => ProcessKind::Qemu,
+            Some("virtiofsd") => ProcessKind::Virtiofsd,
+            _ => ProcessKind::Other,
+        }
+    }
 }
 
 pub struct ProcessCollector {

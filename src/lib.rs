@@ -1,6 +1,6 @@
 mod process;
 
-pub use process::{ProcessCollector, ProcessInfo};
+pub use process::{ProcessCollector, ProcessInfo, ProcessKind};
 
 use std::time::{Duration, Instant};
 
