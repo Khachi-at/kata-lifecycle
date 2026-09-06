@@ -1450,3 +1450,61 @@ fn process_info_classifies_kata_processes_by_executable() {
         assert_eq!(process.kind(), expected_kind);
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn process_collector_filters_snapshot_by_process_kind() {
+    use std::os::unix::fs::symlink;
+
+    let proc_root = tempfile::tempdir().unwrap();
+
+    let create_process = |pid: &str, executable: &str| {
+        let process_dir = proc_root.path().join(pid);
+
+        std::fs::create_dir(&process_dir).unwrap();
+
+        std::fs::write(
+            process_dir.join("status"),
+            "Name:\tprocess\n\
+             State:\tS (sleeping)\n\
+             PPid:\t1\n\
+             VmRSS:\t64 kB\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            process_dir.join("cmdline"),
+            format!("{executable}\0--test\0").as_bytes(),
+        )
+        .unwrap();
+
+        symlink(format!("/usr/bin/{executable}"), process_dir.join("exe")).unwrap();
+    };
+
+    create_process("100", "containerd-shim-kata-v2");
+    create_process("200", "qemu-system-x86_64");
+    create_process("300", "virtiofsd");
+    create_process("400", "other-process");
+
+    let collector = ProcessCollector::new(proc_root.path());
+
+    let qemu_processes = collector.snapshot_kind(ProcessKind::Qemu).unwrap();
+
+    assert_eq!(
+        qemu_processes
+            .iter()
+            .map(|process| process.pid)
+            .collect::<Vec<_>>(),
+        vec![200]
+    );
+
+    let shim_processes = collector.snapshot_kind(ProcessKind::Shim).unwrap();
+
+    assert_eq!(
+        shim_processes
+            .iter()
+            .map(|process| process.pid)
+            .collect::<Vec<_>>(),
+        vec![100]
+    );
+}

@@ -109,6 +109,14 @@ impl ProcessCollector {
 
         Ok(processes)
     }
+
+    pub fn snapshot_kind(&self, kind: ProcessKind) -> anyhow::Result<Vec<ProcessInfo>> {
+        Ok(self
+            .snapshot()?
+            .into_iter()
+            .filter(|process| process.kind() == kind)
+            .collect())
+    }
 }
 
 fn status_field<'a>(status: &'a str, field: &str) -> anyhow::Result<&'a str> {
