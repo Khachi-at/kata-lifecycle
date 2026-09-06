@@ -1,7 +1,5 @@
 use std::{fs, path::PathBuf};
 
-use anyhow::Ok;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessInfo {
     pub pid: u32,
@@ -65,6 +63,32 @@ impl ProcessCollector {
             cmdline,
             exe,
         })
+    }
+
+    pub fn snapshot(&self) -> anyhow::Result<Vec<ProcessInfo>> {
+        let mut processes = Vec::new();
+
+        for entry in fs::read_dir(&self.proc_root)? {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let Some(file_name) = file_name.to_str() else {
+                continue;
+            };
+
+            let Ok(pid) = file_name.parse::<u32>() else {
+                continue;
+            };
+
+            let Ok(process) = self.read_process(pid) else {
+                continue;
+            };
+
+            processes.push(process);
+        }
+
+        processes.sort_by_key(|process| process.pid);
+
+        Ok(processes)
     }
 }
 

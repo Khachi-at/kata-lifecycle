@@ -1370,3 +1370,60 @@ fn process_collector_reads_process_from_procfs() {
     );
     assert_eq!(process.exe.to_string_lossy(), "/usr/bin/qemu-system-x86_64");
 }
+
+#[cfg(unix)]
+#[test]
+fn process_collector_snapshots_valid_processes() {
+    use std::os::unix::fs::symlink;
+
+    let proc_root = tempfile::tempdir().unwrap();
+
+    let create_process = |pid: &str, command: &str| {
+        let process_dir = proc_root.path().join(pid);
+
+        std::fs::create_dir(&process_dir).unwrap();
+
+        std::fs::write(
+            process_dir.join("status"),
+            format!(
+                "Name:\t{command}\n\
+                 State:\tS (sleeping)\n\
+                 PPid:\t1\n\
+                 VmRSS:\t128 kB\n"
+            ),
+        )
+        .unwrap();
+
+        std::fs::write(
+            process_dir.join("cmdline"),
+            format!("{command}\0--test\0").as_bytes(),
+        )
+        .unwrap();
+
+        symlink(format!("/usr/bin/{command}"), process_dir.join("exe")).unwrap();
+    };
+
+    create_process("200", "qemu-system-x86_64");
+    create_process("100", "containerd-shim-kata-v2");
+
+    std::fs::create_dir(proc_root.path().join("self")).unwrap();
+    std::fs::create_dir(proc_root.path().join("not-a-pid")).unwrap();
+
+    let collector = ProcessCollector::new(proc_root.path());
+    let processes = collector.snapshot().unwrap();
+
+    assert_eq!(
+        processes
+            .iter()
+            .map(|process| process.pid)
+            .collect::<Vec<_>>(),
+        vec![100, 200]
+    );
+
+    assert_eq!(
+        processes[0].cmdline,
+        vec!["containerd-shim-kata-v2", "--test"]
+    );
+
+    assert_eq!(processes[1].cmdline, vec!["qemu-system-x86_64", "--test"]);
+}
