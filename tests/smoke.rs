@@ -1711,7 +1711,7 @@ async fn sigkill_scenario_ignores_qemu_existing_before_test() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn sigkill_scenario_reports_new_shim_process() {
+async fn sigkill_scenario_reports_all_new_processes() {
     use std::os::unix::fs::symlink;
 
     struct LeakingShimRunner {
@@ -1730,25 +1730,37 @@ async fn sigkill_scenario_reports_new_shim_process() {
             assert_eq!(timeout, Duration::from_secs(5));
 
             if args.first() == Some(&"run") {
-                let process_dir = self.proc_root.join("300");
-                std::fs::create_dir(&process_dir).unwrap();
+                let create_process = |pid: &str, executable: &str, cmdline: &[u8]| {
+                    let process_dir = self.proc_root.join(pid);
+                    std::fs::create_dir(&process_dir).unwrap();
 
-                std::fs::write(
-                    process_dir.join("status"),
-                    "Name:\tcontainerd-shim-kata-v2\n\
-                     State:\tS (sleeping)\n\
-                     PPid:\t1\n\
-                     VmRSS:\t32 kB\n",
-                )
-                .unwrap();
+                    std::fs::write(
+                        process_dir.join("status"),
+                        format!(
+                            "Name:\t{executable}\n\
+                            State:\tS (sleeping)\n\
+                            PPid:\t1\n\
+                            VmRSS:\t32 kB\n"
+                        ),
+                    )
+                    .unwrap();
 
-                std::fs::write(
-                    process_dir.join("cmdline"),
+                    std::fs::write(process_dir.join("cmdline"), cmdline).unwrap();
+
+                    symlink(format!("/usr/bin/{executable}"), process_dir.join("exe")).unwrap();
+                };
+
+                create_process(
+                    "300",
+                    "containerd-shim-kata-v2",
                     b"containerd-shim-kata-v2\0kata-test\0",
-                )
-                .unwrap();
+                );
 
-                symlink("/usr/bin/containerd-shim-kata-v2", process_dir.join("exe")).unwrap();
+                create_process(
+                    "400",
+                    "qemu-system-x86_64",
+                    b"qemu-system-x86_64\0kata-test\0",
+                )
             }
 
             Ok(CommandResult {
@@ -1789,6 +1801,8 @@ async fn sigkill_scenario_reports_new_shim_process() {
 
     let reason = report.reason.unwrap();
 
+    assert!(reason.contains("Qemu"));
     assert!(reason.contains("Shim"));
     assert!(reason.contains("300"));
+    assert!(reason.contains("400"));
 }

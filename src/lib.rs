@@ -290,16 +290,23 @@ impl<R: CommandRunner> SigkillScenario<R> {
         }
 
         let resource_kinds = [ProcessKind::Qemu, ProcessKind::Shim, ProcessKind::Virtiofsd];
+        let mut resource_failures = Vec::new();
 
         for kind in resource_kinds {
             if let Err(error) = collector
                 .wait_until_clean(&before, kind, wait_timeout, poll_interval)
                 .await
             {
-                report.passed = false;
-                report.reason = Some(format!("resource cleanup failed: {error}"));
-                break;
+                resource_failures.push(format!("{kind:?}: {error}"));
             }
+        }
+
+        if !resource_failures.is_empty() {
+            report.passed = false;
+            report.reason = Some(format!(
+                "resource cleanup failed: {}",
+                resource_failures.join("; ")
+            ));
         }
 
         Ok(report)
