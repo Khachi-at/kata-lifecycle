@@ -1611,3 +1611,45 @@ async fn process_collector_waits_until_new_processes_disappear() {
         .await
         .unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn process_collector_reports_remaining_pids_on_timeout() {
+    use std::os::unix::fs::symlink;
+
+    let proc_root = tempfile::tempdir().unwrap();
+    let process_dir = proc_root.path().join("200");
+
+    std::fs::create_dir(&process_dir).unwrap();
+
+    std::fs::write(
+        process_dir.join("status"),
+        "Name:\tqemu-system-x86_64\n\
+         State:\tS (sleeping)\n\
+         PPid:\t1\n\
+         VmRSS:\t64 kB\n",
+    )
+    .unwrap();
+
+    std::fs::write(process_dir.join("cmdline"), b"qemu-system-x86_64\0--test\0").unwrap();
+
+    symlink("/usr/bin/qemu-system-x86_64", process_dir.join("exe")).unwrap();
+
+    let collector = ProcessCollector::new(proc_root.path());
+
+    let error = collector
+        .wait_until_clean(
+            &[],
+            ProcessKind::Qemu,
+            Duration::from_millis(30),
+            Duration::from_millis(5),
+        )
+        .await
+        .unwrap_err();
+
+    let message = error.to_string();
+
+    assert!(message.contains("Qemu"));
+    assert!(message.contains("30ms"));
+    assert!(message.contains("200"));
+}

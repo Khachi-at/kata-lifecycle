@@ -125,25 +125,38 @@ impl ProcessCollector {
         wait_timeout: std::time::Duration,
         poll_interval: std::time::Duration,
     ) -> anyhow::Result<()> {
-        tokio::time::timeout(wait_timeout, async {
+        let mut remaining = Vec::new();
+
+        let result = tokio::time::timeout(wait_timeout, async {
             loop {
                 let current = self.snapshot_kind(kind)?;
-                let new_processes = new_processes(before, &current);
+                remaining = new_processes(before, &current);
 
-                if new_processes.is_empty() {
+                if remaining.is_empty() {
                     return Ok(());
                 }
 
                 tokio::time::sleep(poll_interval).await;
             }
         })
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "timed out after {wait_timeout:?} waiting for \
-                new {kind:?} processes to disappear"
-            )
-        })?
+        .await;
+
+        match result {
+            Ok(result) => result,
+            Err(_) => {
+                let pids = remaining
+                    .iter()
+                    .map(|process| process.pid.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                Err(anyhow::anyhow!(
+                    "timed out after {wait_timeout:?} waiting for \
+                    new {kind:?} processes to disappear; \
+                    remaining PIDs: {pids}"
+                ))
+            }
+        }
     }
 }
 
