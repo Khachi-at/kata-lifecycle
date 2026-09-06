@@ -117,6 +117,34 @@ impl ProcessCollector {
             .filter(|process| process.kind() == kind)
             .collect())
     }
+
+    pub async fn wait_until_clean(
+        &self,
+        before: &[ProcessInfo],
+        kind: ProcessKind,
+        wait_timeout: std::time::Duration,
+        poll_interval: std::time::Duration,
+    ) -> anyhow::Result<()> {
+        tokio::time::timeout(wait_timeout, async {
+            loop {
+                let current = self.snapshot_kind(kind)?;
+                let new_processes = new_processes(before, &current);
+
+                if new_processes.is_empty() {
+                    return Ok(());
+                }
+
+                tokio::time::sleep(poll_interval).await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "timed out after {wait_timeout:?} waiting for \
+                new {kind:?} processes to disappear"
+            )
+        })?
+    }
 }
 
 fn status_field<'a>(status: &'a str, field: &str) -> anyhow::Result<&'a str> {

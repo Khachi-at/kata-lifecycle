@@ -1567,3 +1567,47 @@ fn process_snapshot_detects_new_processes_by_pid_and_executable() {
         vec![200, 300]
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn process_collector_waits_until_new_processes_disappear() {
+    use std::os::unix::fs::symlink;
+
+    let proc_root = tempfile::tempdir().unwrap();
+    let process_dir = proc_root.path().join("200");
+
+    std::fs::create_dir(&process_dir).unwrap();
+
+    std::fs::write(
+        process_dir.join("status"),
+        "Name:\tqemu-system-x86_64\n\
+         State:\tS (sleeping)\n\
+         PPid:\t1\n\
+         VmRSS:\t64 kB\n",
+    )
+    .unwrap();
+
+    std::fs::write(process_dir.join("cmdline"), b"qemu-system-x86_64\0--test\0").unwrap();
+
+    symlink("/usr/bin/qemu-system-x86_64", process_dir.join("exe")).unwrap();
+
+    let collector = ProcessCollector::new(proc_root.path());
+    let before = Vec::new();
+
+    let process_dir_to_remove = process_dir.clone();
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        std::fs::remove_dir_all(process_dir_to_remove).unwrap();
+    });
+
+    collector
+        .wait_until_clean(
+            &before,
+            ProcessKind::Qemu,
+            Duration::from_secs(1),
+            Duration::from_millis(5),
+        )
+        .await
+        .unwrap();
+}
