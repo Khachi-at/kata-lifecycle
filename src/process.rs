@@ -126,3 +126,15 @@ fn status_field<'a>(status: &'a str, field: &str) -> anyhow::Result<&'a str> {
         .map(str::trim)
         .ok_or_else(|| anyhow::anyhow!("missing proc status field {field}"))
 }
+
+pub fn new_processes(before: &[ProcessInfo], after: &[ProcessInfo]) -> Vec<ProcessInfo> {
+    after
+        .iter()
+        .filter(|after_process| {
+            !before.iter().any(|before_process| {
+                before_process.pid == after_process.pid && before_process.exe == after_process.exe
+            })
+        })
+        .cloned()
+        .collect()
+}

@@ -1508,3 +1508,62 @@ fn process_collector_filters_snapshot_by_process_kind() {
         vec![100]
     );
 }
+
+#[test]
+fn process_snapshot_detects_new_processes_by_pid_and_executable() {
+    let before = vec![
+        ProcessInfo {
+            pid: 100,
+            ppid: 1,
+            state: "S".to_string(),
+            rss_bytes: 100,
+            cmdline: vec!["qemu-system-x86_64".to_string()],
+            exe: "/usr/bin/qemu-system-x86_64".into(),
+        },
+        ProcessInfo {
+            pid: 200,
+            ppid: 1,
+            state: "S".to_string(),
+            rss_bytes: 200,
+            cmdline: vec!["containerd-shim-kata-v2".to_string()],
+            exe: "/usr/bin/containerd-shim-kata-v2".into(),
+        },
+    ];
+
+    let after = vec![
+        ProcessInfo {
+            pid: 100,
+            ppid: 1,
+            state: "S".to_string(),
+            rss_bytes: 999,
+            cmdline: vec!["qemu-system-x86_64".to_string()],
+            exe: "/usr/bin/qemu-system-x86_64".into(),
+        },
+        ProcessInfo {
+            pid: 200,
+            ppid: 1,
+            state: "S".to_string(),
+            rss_bytes: 300,
+            cmdline: vec!["qemu-system-x86_64".to_string()],
+            exe: "/usr/bin/qemu-system-x86_64".into(),
+        },
+        ProcessInfo {
+            pid: 300,
+            ppid: 1,
+            state: "S".to_string(),
+            rss_bytes: 400,
+            cmdline: vec!["virtiofsd".to_string()],
+            exe: "/usr/bin/virtiofsd".into(),
+        },
+    ];
+
+    let new_processes = kata_lifecycle::new_processes(&before, &after);
+
+    assert_eq!(
+        new_processes
+            .iter()
+            .map(|process| process.pid)
+            .collect::<Vec<_>>(),
+        vec![200, 300]
+    );
+}
