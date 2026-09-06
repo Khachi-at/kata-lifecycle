@@ -1653,3 +1653,58 @@ async fn process_collector_reports_remaining_pids_on_timeout() {
     assert!(message.contains("30ms"));
     assert!(message.contains("200"));
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sigkill_scenario_ignores_qemu_existing_before_test() {
+    use std::os::unix::fs::symlink;
+
+    let proc_root = tempfile::tempdir().unwrap();
+    let process_dir = proc_root.path().join("100");
+
+    std::fs::create_dir(&process_dir).unwrap();
+
+    std::fs::write(
+        process_dir.join("status"),
+        "Name:\tqemu-system-x86_64\n\
+         State:\tS (sleeping)\n\
+         PPid:\t1\n\
+         VmRSS:\t64 kB\n",
+    )
+    .unwrap();
+
+    std::fs::write(
+        process_dir.join("cmdline"),
+        b"qemu-system-x86_64\0--existing\0",
+    )
+    .unwrap();
+
+    symlink("/usr/bin/qemu-system-x86_64", process_dir.join("exe")).unwrap();
+
+    let collector = ProcessCollector::new(proc_root.path());
+
+    let client = CtrClient::new(
+        RecordingRunner {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        },
+        Duration::from_secs(5),
+    );
+
+    let scenario = SigkillScenario::new(
+        client,
+        "docker.io/library/busybox:latest",
+        "kata-lifecycle-test",
+    );
+
+    let report = scenario
+        .run_with_process_collector(
+            &collector,
+            Duration::from_millis(50),
+            Duration::from_millis(5),
+        )
+        .await
+        .unwrap();
+
+    assert!(report.passed);
+    assert_eq!(report.reason, None);
+}

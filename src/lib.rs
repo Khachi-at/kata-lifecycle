@@ -274,6 +274,31 @@ impl<R: CommandRunner> SigkillScenario<R> {
             remove_container,
         }
     }
+
+    pub async fn run_with_process_collector(
+        &self,
+        collector: &ProcessCollector,
+        wait_timeout: Duration,
+        poll_interval: Duration,
+    ) -> anyhow::Result<ScenarioReport> {
+        let before = collector.snapshot_kind(ProcessKind::Qemu)?;
+
+        let mut report = self.run().await?;
+
+        if !report.passed {
+            return Ok(report);
+        }
+
+        if let Err(error) = collector
+            .wait_until_clean(&before, ProcessKind::Qemu, wait_timeout, poll_interval)
+            .await
+        {
+            report.passed = false;
+            report.reason = Some(format!("resource cleanup failed: {error}"));
+        }
+
+        Ok(report)
+    }
 }
 
 pub struct SmokeService<R> {
