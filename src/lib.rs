@@ -457,3 +457,10 @@ impl CommandRunner for ProcessCommandRunner {
         })
     }
 }
+
+pub async fn run_smoke(timeout: Duration) -> anyhow::Result<SmokeReport> {
+    let runner = ProcessCommandRunner;
+    let service = SmokeService::new(runner, timeout);
+
+    service.run().await
+}
