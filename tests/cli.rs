@@ -12,4 +12,5 @@ fn cli_prints_help() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("ata-lifecycle smoke"));
+    assert!(stdout.contains("kata-lifecycle run sigkill"));
 }
