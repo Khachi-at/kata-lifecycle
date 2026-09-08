@@ -26,6 +26,7 @@ pub struct ScenarioReport {
     pub name: String,
     pub passed: bool,
     pub reason: Option<String>,
+    pub leaked_processes: Vec<ProcessInfo>,
 }
 
 #[async_trait::async_trait]
@@ -200,6 +201,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
                     "failed to start container: exit_code={:?}, stderr={}",
                     start_result.exit_code, start_result.stderr,
                 )),
+                leaked_processes: Vec::new(),
             });
         }
 
@@ -222,6 +224,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
                     "failed to kill task: exit_code={:?}, stderr={}",
                     kill_result.exit_code, kill_result.stderr,
                 )),
+                leaked_processes: Vec::new(),
             });
         }
 
@@ -254,6 +257,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
                 name: "sigkill".to_string(),
                 passed: false,
                 reason: Some(cleanup_failures.join("; ")),
+                leaked_processes: Vec::new(),
             });
         }
 
@@ -261,6 +265,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
             name: "sigkill".to_string(),
             passed: true,
             reason: None,
+            leaked_processes: Vec::new(),
         })
     }
 
@@ -290,7 +295,9 @@ impl<R: CommandRunner> SigkillScenario<R> {
         }
 
         let resource_kinds = [ProcessKind::Qemu, ProcessKind::Shim, ProcessKind::Virtiofsd];
+
         let mut resource_failures = Vec::new();
+        let mut leaked_process = Vec::new();
 
         for kind in resource_kinds {
             if let Err(error) = collector
@@ -298,6 +305,9 @@ impl<R: CommandRunner> SigkillScenario<R> {
                 .await
             {
                 resource_failures.push(format!("{kind:?}: {error}"));
+
+                let current = collector.snapshot_kind(kind)?;
+                leaked_process.extend(new_processes(&before, &current));
             }
         }
 
@@ -307,6 +317,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
                 "resource cleanup failed: {}",
                 resource_failures.join("; ")
             ));
+            report.leaked_processes = leaked_process;
         }
 
         Ok(report)

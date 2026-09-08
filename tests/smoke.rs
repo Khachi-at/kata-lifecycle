@@ -1799,10 +1799,39 @@ async fn sigkill_scenario_reports_all_new_processes() {
 
     assert!(!report.passed);
 
-    let reason = report.reason.unwrap();
+    let reason = report.reason.as_deref().unwrap();
 
     assert!(reason.contains("Qemu"));
     assert!(reason.contains("Shim"));
     assert!(reason.contains("300"));
     assert!(reason.contains("400"));
+
+    let mut leaked_pids = report
+        .leaked_processes
+        .iter()
+        .map(|process| process.pid)
+        .collect::<Vec<_>>();
+
+    leaked_pids.sort_unstable();
+
+    assert_eq!(leaked_pids, vec![300, 400]);
+    assert_eq!(
+        report
+            .leaked_processes
+            .iter()
+            .find(|process| process.pid == 300)
+            .unwrap()
+            .kind(),
+        ProcessKind::Shim
+    );
+
+    assert_eq!(
+        report
+            .leaked_processes
+            .iter()
+            .find(|process| process.pid == 400)
+            .unwrap()
+            .kind(),
+        ProcessKind::Qemu
+    );
 }
