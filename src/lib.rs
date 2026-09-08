@@ -30,6 +30,45 @@ pub struct ScenarioReport {
     pub leaked_processes: Vec<ProcessInfo>,
 }
 
+impl ScenarioReport {
+    pub fn to_json(&self) -> anyhow::Result<String> {
+        let result = if self.passed { "pass" } else { "fail" };
+
+        let leaked_processes = self
+            .leaked_processes
+            .iter()
+            .map(|process| {
+                let kind = match process.kind() {
+                    ProcessKind::Shim => "shim",
+                    ProcessKind::Qemu => "qemu",
+                    ProcessKind::Virtiofsd => "virtiofsd",
+                    ProcessKind::Other => "other",
+                };
+
+                serde_json::json!({
+                    "pid": process.pid,
+                    "ppid": process.ppid,
+                    "kind": kind,
+                    "state": process.state,
+                    "rss_bytes": process.rss_bytes,
+                    "cmdline": process.cmdline,
+                    "exe": process.exe,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let report = serde_json::json!({
+            "scenario": self.name,
+            "result": result,
+            "duration_ms": self.duration_ms,
+            "reason":self.reason,
+            "leaked_processes": leaked_processes,
+        });
+
+        Ok(serde_json::to_string_pretty(&report)?)
+    }
+}
+
 #[async_trait::async_trait]
 pub trait CommandRunner {
     async fn run(

@@ -9,7 +9,7 @@ use std::{
 use anyhow::Ok;
 use kata_lifecycle::{
     CommandResult, CommandRunner, CtrClient, ProcessCollector, ProcessCommandRunner, ProcessInfo,
-    ProcessKind, SigkillScenario, SmokeService,
+    ProcessKind, ScenarioReport, SigkillScenario, SmokeService,
 };
 
 struct FakeRunner;
@@ -1840,4 +1840,39 @@ async fn sigkill_scenario_reports_all_new_processes() {
         "duration should include process cleanup waits: {}ms",
         report.duration_ms,
     );
+}
+
+#[test]
+fn scenario_report_serializes_to_json() {
+    let report = ScenarioReport {
+        name: "sigkill".to_string(),
+        passed: false,
+        reason: Some("QEMU process remained after cleanup".to_string()),
+        duration_ms: 12_400,
+        leaked_processes: vec![ProcessInfo {
+            pid: 1234,
+            ppid: 100,
+            state: "S".to_string(),
+            rss_bytes: 412_000_000,
+            cmdline: vec![
+                "qemu-system-x86_64".to_string(),
+                "-name".to_string(),
+                "kata-test".to_string(),
+            ],
+            exe: "/usr/bin/qemu-system-x86_64".into(),
+        }],
+    };
+
+    let json = report.to_json().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(value["scenario"], "sigkill");
+    assert_eq!(value["result"], "fail");
+    assert_eq!(value["duration_ms"], 12_400);
+    assert_eq!(value["reason"], "QEMU process remained after cleanup");
+
+    assert_eq!(value["leaked_processes"][0]["pid"], 1234);
+    assert_eq!(value["leaked_processes"][0]["kind"], "qemu");
+    assert_eq!(value["leaked_processes"][0]["state"], "S");
+    assert_eq!(value["leaked_processes"][0]["rss_bytes"], 412_000_000);
 }
