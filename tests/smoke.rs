@@ -1900,3 +1900,25 @@ fn scenario_report_writes_json_file() {
     assert_eq!(value["duration_ms"], 250);
     assert_eq!(value["leaked_processes"], serde_json::json!([]));
 }
+
+#[test]
+fn scenario_report_reports_output_path_when_json_write_fails() {
+    let directory = tempfile::tempdir().unwrap();
+
+    let output_path = directory.path().join("missing-parent").join("result.json");
+
+    let report = ScenarioReport {
+        name: "sigkill".to_string(),
+        passed: true,
+        reason: None,
+        duration_ms: 10,
+        leaked_processes: Vec::new(),
+    };
+
+    let error = report.write_json(&output_path).unwrap_err();
+    let message = error.to_string();
+
+    assert!(message.contains("failed to write JSON report"));
+    assert!(message.contains("result.json"));
+    assert!(message.contains("missing-parent"));
+}
