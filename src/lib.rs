@@ -26,6 +26,7 @@ pub struct ScenarioReport {
     pub name: String,
     pub passed: bool,
     pub reason: Option<String>,
+    pub duration_ms: u64,
     pub leaked_processes: Vec<ProcessInfo>,
 }
 
@@ -179,6 +180,8 @@ impl<R> SigkillScenario<R> {
 
 impl<R: CommandRunner> SigkillScenario<R> {
     pub async fn run(&self) -> anyhow::Result<ScenarioReport> {
+        let started_at = Instant::now();
+
         let start_result = match self
             .client
             .run_container(&self.image, &self.container_id, &["sleep", "300"])
@@ -201,6 +204,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
                     "failed to start container: exit_code={:?}, stderr={}",
                     start_result.exit_code, start_result.stderr,
                 )),
+                duration_ms: elapsed_ms(started_at),
                 leaked_processes: Vec::new(),
             });
         }
@@ -224,6 +228,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
                     "failed to kill task: exit_code={:?}, stderr={}",
                     kill_result.exit_code, kill_result.stderr,
                 )),
+                duration_ms: elapsed_ms(started_at),
                 leaked_processes: Vec::new(),
             });
         }
@@ -257,6 +262,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
                 name: "sigkill".to_string(),
                 passed: false,
                 reason: Some(cleanup_failures.join("; ")),
+                duration_ms: elapsed_ms(started_at),
                 leaked_processes: Vec::new(),
             });
         }
@@ -265,6 +271,7 @@ impl<R: CommandRunner> SigkillScenario<R> {
             name: "sigkill".to_string(),
             passed: true,
             reason: None,
+            duration_ms: elapsed_ms(started_at),
             leaked_processes: Vec::new(),
         })
     }
@@ -286,11 +293,14 @@ impl<R: CommandRunner> SigkillScenario<R> {
         wait_timeout: Duration,
         poll_interval: Duration,
     ) -> anyhow::Result<ScenarioReport> {
+        let started_at = Instant::now();
+
         let before = collector.snapshot()?;
 
         let mut report = self.run().await?;
 
         if !report.passed {
+            report.duration_ms = elapsed_ms(started_at);
             return Ok(report);
         }
 
@@ -320,8 +330,13 @@ impl<R: CommandRunner> SigkillScenario<R> {
             report.leaked_processes = leaked_process;
         }
 
+        report.duration_ms = elapsed_ms(started_at);
         Ok(report)
     }
+}
+
+fn elapsed_ms(started_at: Instant) -> u64 {
+    started_at.elapsed().as_millis() as u64
 }
 
 pub struct SmokeService<R> {

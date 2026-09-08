@@ -1834,4 +1834,10 @@ async fn sigkill_scenario_reports_all_new_processes() {
             .kind(),
         ProcessKind::Qemu
     );
+
+    assert!(
+        report.duration_ms >= 50,
+        "duration should include process cleanup waits: {}ms",
+        report.duration_ms,
+    );
 }
