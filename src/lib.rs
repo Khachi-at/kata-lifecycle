@@ -2,7 +2,11 @@ mod process;
 
 pub use process::{ProcessCollector, ProcessInfo, ProcessKind, new_processes};
 
-use std::time::{Duration, Instant};
+use std::{
+    fs,
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use tokio::process::Command;
 
@@ -66,6 +70,17 @@ impl ScenarioReport {
         });
 
         Ok(serde_json::to_string_pretty(&report)?)
+    }
+
+    pub fn write_json(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        let json = self.to_json()?;
+
+        fs::write(path, json).map_err(|error| {
+            anyhow::anyhow!("failed to write JSON report {}: {error}", path.display())
+        })?;
+
+        Ok(())
     }
 }
 

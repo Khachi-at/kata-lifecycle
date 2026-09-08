@@ -1876,3 +1876,27 @@ fn scenario_report_serializes_to_json() {
     assert_eq!(value["leaked_processes"][0]["state"], "S");
     assert_eq!(value["leaked_processes"][0]["rss_bytes"], 412_000_000);
 }
+
+#[test]
+fn scenario_report_writes_json_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let output_path = directory.path().join("result.json");
+
+    let report = ScenarioReport {
+        name: "sigkill".to_string(),
+        passed: true,
+        reason: None,
+        duration_ms: 250,
+        leaked_processes: Vec::new(),
+    };
+
+    report.write_json(&output_path).unwrap();
+
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    assert_eq!(value["scenario"], "sigkill");
+    assert_eq!(value["result"], "pass");
+    assert_eq!(value["duration_ms"], 250);
+    assert_eq!(value["leaked_processes"], serde_json::json!([]));
+}
