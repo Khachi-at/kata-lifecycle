@@ -1,4 +1,4 @@
-use std::{process, time::Duration};
+use std::{path::Path, process, time::Duration};
 
 use kata_lifecycle::{
     CtrClient, ProcessCollector, ProcessCommandRunner, ScenarioReport, SigkillScenario, run_smoke,
@@ -9,6 +9,7 @@ kata-lifecycle
 
 USAGE:
     kata-lifecycle smoke
+    kata-lifecycle smoke --format json --output result.json
     kata-lifecycle run sigkill
     kata-lifecycle --help
 ";
@@ -33,6 +34,35 @@ async fn run_sigkill() -> anyhow::Result<ScenarioReport> {
         .await
 }
 
+fn parse_output_path(args: &mut impl Iterator<Item = String>) -> anyhow::Result<Option<String>> {
+    let mut output_path = None;
+
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--format" => {
+                let format = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("missing value for --format"))?;
+
+                if format != "json" {
+                    return Err(anyhow::anyhow!("unsupported format: {format}"));
+                }
+            }
+            "--output" => {
+                output_path = Some(
+                    args.next()
+                        .ok_or_else(|| anyhow::anyhow!("missing value for --output"))?,
+                );
+            }
+            argument => {
+                return Err(anyhow::anyhow!("unexpected argument: {argument}"));
+            }
+        }
+    }
+
+    Ok(output_path)
+}
+
 #[tokio::main]
 async fn main() {
     let mut args = std::env::args().skip(1);
@@ -42,9 +72,17 @@ async fn main() {
             println!("{USAGE}");
         }
         Some("smoke") => {
+            let output_path = match parse_output_path(&mut args) {
+                Ok(path) => path,
+                Err(error) => {
+                    eprintln!("{}", render_smoke_error(&error));
+                    process::exit(2);
+                }
+            };
+
             run_smoke(Duration::from_secs(3))
                 .await
-                .map(handle_smoke_report)
+                .map(|report| handle_smoke_report(report, output_path.as_deref().map(Path::new)))
                 .unwrap_or_else(|error| {
                     eprintln!("{}", render_smoke_error(&error));
                     process::exit(1);
@@ -71,7 +109,18 @@ async fn main() {
     }
 }
 
-fn handle_smoke_report(report: kata_lifecycle::SmokeReport) {
+fn write_output(content: &str, output_path: Option<&Path>) -> anyhow::Result<()> {
+    match output_path {
+        Some(path) => std::fs::write(path, content)
+            .map_err(|error| anyhow::anyhow!("failed to write output {}: {error}", path.display())),
+        None => {
+            println!("{content}");
+            Ok(())
+        }
+    }
+}
+
+fn handle_smoke_report(report: kata_lifecycle::SmokeReport, output_path: Option<&Path>) {
     let result = if report.passed { "pass" } else { "fail" };
 
     let json = serde_json::json!({
@@ -80,10 +129,12 @@ fn handle_smoke_report(report: kata_lifecycle::SmokeReport) {
         "reason": report.reason,
     });
 
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&json).expect("smoke report should be serializable")
-    );
+    let content = serde_json::to_string_pretty(&json).expect("smoke report should be serializable");
+
+    if let Err(error) = write_output(&content, output_path) {
+        eprintln!("{error}");
+        process::exit(1);
+    }
 
     if !report.passed {
         process::exit(1);
@@ -136,5 +187,18 @@ mod tests {
         assert_eq!(value["scenario"], "smoke");
         assert_eq!(value["result"], "error");
         assert_eq!(value["reason"], "ctr command not found");
+    }
+
+    #[test]
+    fn write_output_json_writes_report_to_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let output_path = directory.path().join("result.json");
+
+        let json = r#"{"scenario":"smoke","result":"pass"}"#;
+
+        write_output(json, Some(&output_path)).unwrap();
+
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        assert_eq!(content, json);
     }
 }
