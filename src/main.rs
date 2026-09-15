@@ -11,6 +11,7 @@ USAGE:
     kata-lifecycle smoke
     kata-lifecycle smoke --format json --output result.json
     kata-lifecycle run sigkill
+    kata-lifecycle run sigkill --format json --output result.json
     kata-lifecycle --help
 ";
 
@@ -94,9 +95,19 @@ async fn main() {
                 process::exit(2);
             }
 
+            let output_path = match parse_output_path(&mut args) {
+                Ok(path) => path,
+                Err(error) => {
+                    eprintln!("{}", render_scenario_error(&error));
+                    process::exit(2);
+                }
+            };
+
             run_sigkill()
                 .await
-                .map(handle_scenario_report)
+                .map(|report| {
+                    handle_scenario_report(report, output_path.as_deref().map(Path::new));
+                })
                 .unwrap_or_else(|error| {
                     eprintln!("{}", render_scenario_error(&error));
                     process::exit(1);
@@ -151,12 +162,20 @@ fn render_smoke_error(error: &anyhow::Error) -> String {
     serde_json::to_string_pretty(&json).expect("smoke error should be serializable")
 }
 
-fn handle_scenario_report(report: ScenarioReport) {
-    let json = report
-        .to_json()
-        .expect("scenario report should be serializable");
+fn write_scenario_report(
+    report: &ScenarioReport,
+    output_path: Option<&Path>,
+) -> anyhow::Result<()> {
+    let json = report.to_json()?;
 
-    println!("{json}");
+    write_output(&json, output_path)
+}
+
+fn handle_scenario_report(report: ScenarioReport, output_path: Option<&Path>) {
+    if let Err(error) = write_scenario_report(&report, output_path) {
+        eprintln!("{}", render_scenario_error(&error));
+        process::exit(1);
+    }
 
     if !report.passed {
         process::exit(1);
@@ -200,5 +219,28 @@ mod tests {
 
         let content = std::fs::read_to_string(&output_path).unwrap();
         assert_eq!(content, json);
+    }
+
+    #[test]
+    fn scenario_report_can_be_written_to_requested_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let output_path = directory.path().join("sigkill.json");
+
+        let report = ScenarioReport {
+            name: "sigkill".to_string(),
+            passed: true,
+            reason: None,
+            duration_ms: 100,
+            leaked_processes: Vec::new(),
+        };
+
+        write_scenario_report(&report, Some(&output_path)).unwrap();
+
+        let content = std::fs::read_to_string(output_path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(value["scenario"], "sigkill");
+        assert_eq!(value["result"], "pass");
+        assert_eq!(value["duration_ms"], 100);
     }
 }
