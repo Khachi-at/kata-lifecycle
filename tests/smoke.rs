@@ -1922,3 +1922,48 @@ fn scenario_report_reports_output_path_when_json_write_fails() {
     assert!(message.contains("result.json"));
     assert!(message.contains("missing-parent"));
 }
+
+#[test]
+fn scenario_report_serializes_to_junit_xml() {
+    let report = ScenarioReport {
+        name: "sigkill".to_string(),
+        passed: false,
+        reason: Some("QEMU process remained".to_string()),
+        duration_ms: 12_400,
+        leaked_processes: Vec::new(),
+    };
+
+    let xml = report.to_junit_xml().unwrap();
+
+    assert!(xml.contains("<testsuite"));
+    assert!(xml.contains("name=\"kata-lifecycle\""));
+    assert!(xml.contains("tests=\"1\""));
+    assert!(xml.contains("failures=\"1\""));
+    assert!(xml.contains("<testcase"));
+    assert!(xml.contains("name=\"sigkill\""));
+    assert!(xml.contains("time=\"12.400\""));
+    assert!(xml.contains("<failure"));
+    assert!(xml.contains("QEMU process remained"));
+}
+
+#[test]
+fn scenario_report_writes_junit_xml_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let output_path = directory.path().join("results.xml");
+
+    let report = ScenarioReport {
+        name: "sigkill".to_string(),
+        passed: true,
+        reason: None,
+        duration_ms: 250,
+        leaked_processes: Vec::new(),
+    };
+
+    report.write_junit_xml(&output_path).unwrap();
+
+    let content = std::fs::read_to_string(output_path).unwrap();
+
+    assert!(content.starts_with("<?xml version=\"1.0\""));
+    assert!(content.contains("failures=\"0\""));
+    assert!(content.contains("name=\"sigkill\""));
+}

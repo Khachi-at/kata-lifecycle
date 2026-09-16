@@ -82,6 +82,55 @@ impl ScenarioReport {
 
         Ok(())
     }
+
+    pub fn to_junit_xml(&self) -> anyhow::Result<String> {
+        let scenario_name = escape_xml(&self.name);
+        let duration_seconds = self.duration_ms as f64 / 1000.0;
+
+        let failure = match &self.reason {
+            Some(reason) if !self.passed => {
+                format!(
+                    "<failure message=\"{}\">{}</failure>",
+                    escape_xml(reason),
+                    escape_xml(reason)
+                )
+            }
+            _ => String::new(),
+        };
+
+        let testcase = format!(
+            "<testcase name=\"{scenario_name}\" time=\"{duration_seconds:.3}\">{failure}</testcase>"
+        );
+
+        let failures = if self.passed { 0 } else { 1 };
+        Ok(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <testsuite name=\"kata-lifecycle\" tests=\"1\" \
+                 failures=\"{failures}\" errors=\"0\" time=\"{duration_seconds:.3}\">\n\
+                   {testcase}\n\
+                 </testsuite>\n"
+        ))
+    }
+
+    pub fn write_junit_xml(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        let xml = self.to_junit_xml()?;
+
+        fs::write(path, xml).map_err(|error| {
+            anyhow::anyhow!("failed to write JUnit report {}: {error}", path.display())
+        })?;
+
+        Ok(())
+    }
+}
+
+fn escape_xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 #[async_trait::async_trait]
