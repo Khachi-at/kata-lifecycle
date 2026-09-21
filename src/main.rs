@@ -1,8 +1,23 @@
-use std::{path::Path, process, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process,
+    time::Duration,
+};
 
 use kata_lifecycle::{
     CtrClient, ProcessCollector, ProcessCommandRunner, ScenarioReport, SigkillScenario, run_smoke,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Json,
+    Junit,
+}
+
+struct OutputOptions {
+    format: OutputFormat,
+    output_path: Option<PathBuf>,
+}
 
 const USAGE: &str = "\
 kata-lifecycle
@@ -12,6 +27,7 @@ USAGE:
     kata-lifecycle smoke --format json --output result.json
     kata-lifecycle run sigkill
     kata-lifecycle run sigkill --format json --output result.json
+    kata-lifecycle run sigkill --format junit --output results.xml
     kata-lifecycle --help
 ";
 
@@ -35,33 +51,39 @@ async fn run_sigkill() -> anyhow::Result<ScenarioReport> {
         .await
 }
 
-fn parse_output_path(args: &mut impl Iterator<Item = String>) -> anyhow::Result<Option<String>> {
+fn parse_output_options(args: &mut impl Iterator<Item = String>) -> anyhow::Result<OutputOptions> {
+    let mut format = OutputFormat::Json;
     let mut output_path = None;
 
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--format" => {
-                let format = args
+                let value = args
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("missing value for --format"))?;
 
-                if format != "json" {
-                    return Err(anyhow::anyhow!("unsupported format: {format}"));
-                }
+                format = match value.as_str() {
+                    "json" => OutputFormat::Json,
+                    "junit" => OutputFormat::Junit,
+                    _ => {
+                        return Err(anyhow::anyhow!("unsupported format: {value}"));
+                    }
+                };
             }
             "--output" => {
-                output_path = Some(
-                    args.next()
-                        .ok_or_else(|| anyhow::anyhow!("missing value for --output"))?,
-                );
+                output_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        anyhow::anyhow!("missing value for --output")
+                    })?));
             }
-            argument => {
-                return Err(anyhow::anyhow!("unexpected argument: {argument}"));
-            }
+            argument => return Err(anyhow::anyhow!("unexpected argument: {argument}")),
         }
     }
 
-    Ok(output_path)
+    Ok(OutputOptions {
+        format,
+        output_path,
+    })
 }
 
 #[tokio::main]
@@ -73,17 +95,26 @@ async fn main() {
             println!("{USAGE}");
         }
         Some("smoke") => {
-            let output_path = match parse_output_path(&mut args) {
-                Ok(path) => path,
+            let options = match parse_output_options(&mut args) {
+                Ok(options) => options,
                 Err(error) => {
                     eprintln!("{}", render_smoke_error(&error));
                     process::exit(2);
                 }
             };
 
+            if options.format != OutputFormat::Json {
+                let error = anyhow::anyhow!("smoke currently supports only the json format");
+
+                eprintln!("{}", render_smoke_error(&error));
+                process::exit(2);
+            }
+
             run_smoke(Duration::from_secs(3))
                 .await
-                .map(|report| handle_smoke_report(report, output_path.as_deref().map(Path::new)))
+                .map(|report| {
+                    handle_smoke_report(report, options.output_path.as_deref().map(Path::new))
+                })
                 .unwrap_or_else(|error| {
                     eprintln!("{}", render_smoke_error(&error));
                     process::exit(1);
@@ -95,8 +126,8 @@ async fn main() {
                 process::exit(2);
             }
 
-            let output_path = match parse_output_path(&mut args) {
-                Ok(path) => path,
+            let options = match parse_output_options(&mut args) {
+                Ok(options) => options,
                 Err(error) => {
                     eprintln!("{}", render_scenario_error(&error));
                     process::exit(2);
@@ -106,7 +137,7 @@ async fn main() {
             run_sigkill()
                 .await
                 .map(|report| {
-                    handle_scenario_report(report, output_path.as_deref().map(Path::new));
+                    handle_scenario_report(report, &options);
                 })
                 .unwrap_or_else(|error| {
                     eprintln!("{}", render_scenario_error(&error));
@@ -162,17 +193,17 @@ fn render_smoke_error(error: &anyhow::Error) -> String {
     serde_json::to_string_pretty(&json).expect("smoke error should be serializable")
 }
 
-fn write_scenario_report(
-    report: &ScenarioReport,
-    output_path: Option<&Path>,
-) -> anyhow::Result<()> {
-    let json = report.to_json()?;
+fn write_scenario_report(report: &ScenarioReport, options: &OutputOptions) -> anyhow::Result<()> {
+    let content = match options.format {
+        OutputFormat::Json => report.to_json()?,
+        OutputFormat::Junit => report.to_junit_xml()?,
+    };
 
-    write_output(&json, output_path)
+    write_output(&content, options.output_path.as_deref())
 }
 
-fn handle_scenario_report(report: ScenarioReport, output_path: Option<&Path>) {
-    if let Err(error) = write_scenario_report(&report, output_path) {
+fn handle_scenario_report(report: ScenarioReport, options: &OutputOptions) {
+    if let Err(error) = write_scenario_report(&report, options) {
         eprintln!("{}", render_scenario_error(&error));
         process::exit(1);
     }
@@ -234,7 +265,12 @@ mod tests {
             leaked_processes: Vec::new(),
         };
 
-        write_scenario_report(&report, Some(&output_path)).unwrap();
+        let options = OutputOptions {
+            format: OutputFormat::Json,
+            output_path: Some(output_path.clone()),
+        };
+
+        write_scenario_report(&report, &options).unwrap();
 
         let content = std::fs::read_to_string(output_path).unwrap();
         let value: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -242,5 +278,48 @@ mod tests {
         assert_eq!(value["scenario"], "sigkill");
         assert_eq!(value["result"], "pass");
         assert_eq!(value["duration_ms"], 100);
+    }
+
+    #[test]
+    fn parse_output_options_accepts_junit_format() {
+        let arguments = vec![
+            "--format".to_string(),
+            "junit".to_string(),
+            "--output".to_string(),
+            "results.xml".to_string(),
+        ];
+
+        let options = parse_output_options(&mut arguments.into_iter()).unwrap();
+
+        assert_eq!(options.format, OutputFormat::Junit);
+        assert_eq!(options.output_path, Some(PathBuf::from("results.xml")));
+    }
+
+    #[test]
+    fn scenario_report_writes_junit_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let output_path = directory.path().join("results.xml");
+
+        let report = ScenarioReport {
+            name: "sigkill".to_string(),
+            passed: false,
+            reason: Some("QEMU remained".to_string()),
+            duration_ms: 1250,
+            leaked_processes: Vec::new(),
+        };
+
+        let options = OutputOptions {
+            format: OutputFormat::Junit,
+            output_path: Some(output_path.clone()),
+        };
+
+        write_scenario_report(&report, &options).unwrap();
+
+        let content = std::fs::read_to_string(output_path).unwrap();
+
+        assert!(content.contains("<testsuite"));
+        assert!(content.contains("failures=\"1\""));
+        assert!(content.contains("name=\"sigkill\""));
+        assert!(content.contains("QEMU remained"));
     }
 }
