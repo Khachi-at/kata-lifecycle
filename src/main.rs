@@ -19,6 +19,12 @@ struct OutputOptions {
     output_path: Option<PathBuf>,
 }
 
+struct RunOptions {
+    output: OutputOptions,
+    image: String,
+    timeout: Duration,
+}
+
 const USAGE: &str = "\
 kata-lifecycle
 
@@ -26,19 +32,20 @@ USAGE:
     kata-lifecycle smoke
     kata-lifecycle smoke --format json --output result.json
     kata-lifecycle run sigkill
+    kata-lifecycle run sigkill --image IMAGE --timeout SECONDS
     kata-lifecycle run sigkill --format json --output result.json
     kata-lifecycle run sigkill --format junit --output results.xml
     kata-lifecycle --help
 ";
 
-async fn run_sigkill() -> anyhow::Result<ScenarioReport> {
+async fn run_sigkill(image: &str, timeout: Duration) -> anyhow::Result<ScenarioReport> {
     let runner = ProcessCommandRunner;
 
-    let client = CtrClient::new(runner, Duration::from_secs(30));
+    let client = CtrClient::new(runner, timeout);
 
     let container_id = format!("kata-lifecycle-{}", process::id());
 
-    let scenario = SigkillScenario::new(client, "docker.io/library/busybox:latest", &container_id);
+    let scenario = SigkillScenario::new(client, image, &container_id);
 
     let collector = ProcessCollector::new("/proc");
 
@@ -86,6 +93,73 @@ fn parse_output_options(args: &mut impl Iterator<Item = String>) -> anyhow::Resu
     })
 }
 
+fn parse_run_options(args: &mut impl Iterator<Item = String>) -> anyhow::Result<RunOptions> {
+    let mut format = OutputFormat::Json;
+    let mut output_path = None;
+    let mut image = "docker.io/library/busybox:latest".to_string();
+    let mut timeout = Duration::from_secs(30);
+
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--format" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("missing value for --format"))?;
+
+                format = match value.as_str() {
+                    "json" => OutputFormat::Json,
+                    "junit" => OutputFormat::Junit,
+                    _ => {
+                        return Err(anyhow::anyhow!("unsupported format: {value}"));
+                    }
+                };
+            }
+            "--output" => {
+                output_path =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        anyhow::anyhow!("missing value for --output")
+                    })?));
+            }
+            "--image" => {
+                image = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("missing value for --image"))?;
+
+                if image.is_empty() {
+                    return Err(anyhow::anyhow!("image cannot be empty"));
+                }
+            }
+            "--timeout" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("missing value for --timeout"))?;
+
+                let seconds = value
+                    .parse::<u64>()
+                    .map_err(|_| anyhow::anyhow!("timeout must be a positive integer: {value}"))?;
+
+                if seconds == 0 {
+                    return Err(anyhow::anyhow!("timeout must be greater than zero"));
+                }
+
+                timeout = Duration::from_secs(seconds);
+            }
+            argument => {
+                return Err(anyhow::anyhow!("unexpected argument: {argument}"));
+            }
+        }
+    }
+
+    Ok(RunOptions {
+        output: OutputOptions {
+            format,
+            output_path,
+        },
+        image,
+        timeout,
+    })
+}
+
 #[tokio::main]
 async fn main() {
     let mut args = std::env::args().skip(1);
@@ -126,7 +200,7 @@ async fn main() {
                 process::exit(2);
             }
 
-            let options = match parse_output_options(&mut args) {
+            let options = match parse_run_options(&mut args) {
                 Ok(options) => options,
                 Err(error) => {
                     eprintln!("{}", render_scenario_error(&error));
@@ -134,10 +208,10 @@ async fn main() {
                 }
             };
 
-            run_sigkill()
+            run_sigkill(&options.image, options.timeout)
                 .await
                 .map(|report| {
-                    handle_scenario_report(report, &options);
+                    handle_scenario_report(report, &options.output);
                 })
                 .unwrap_or_else(|error| {
                     eprintln!("{}", render_scenario_error(&error));
@@ -321,5 +395,39 @@ mod tests {
         assert!(content.contains("failures=\"1\""));
         assert!(content.contains("name=\"sigkill\""));
         assert!(content.contains("QEMU remained"));
+    }
+
+    #[test]
+    fn parse_run_options_accepts_image_and_timeout() {
+        let arguments = vec![
+            "--image".to_string(),
+            "example.com/test/busybox:1.0".to_string(),
+            "--timeout".to_string(),
+            "45".to_string(),
+            "--format".to_string(),
+            "junit".to_string(),
+            "--output".to_string(),
+            "results.xml".to_string(),
+        ];
+
+        let options = parse_run_options(&mut arguments.into_iter()).unwrap();
+
+        assert_eq!(options.image, "example.com/test/busybox:1.0");
+        assert_eq!(options.timeout, Duration::from_secs(45));
+        assert_eq!(options.output.format, OutputFormat::Junit);
+        assert_eq!(
+            options.output.output_path,
+            Some(PathBuf::from("results.xml"))
+        );
+    }
+
+    #[test]
+    fn parse_run_options_uses_defaults() {
+        let options = parse_run_options(&mut Vec::<String>::new().into_iter()).unwrap();
+
+        assert_eq!(options.image, "docker.io/library/busybox:latest");
+        assert_eq!(options.timeout, Duration::from_secs(30));
+        assert_eq!(options.output.format, OutputFormat::Json);
+        assert_eq!(options.output.output_path, None);
     }
 }
